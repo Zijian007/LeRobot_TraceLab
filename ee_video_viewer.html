@@ -7,16 +7,18 @@
     <title>LeRobot 轨迹工作台</title>
     <link rel="icon" href="data:,">
     <script src="assets/plotly.min.js" defer></script>
-    <script src="assets/viewer-core.js" defer></script>
-    <link rel="stylesheet" href="assets/viewer.css">
+    <script src="assets/viewer-core.js?v=multi-cam-1" defer></script>
+    <link rel="stylesheet" href="assets/viewer.css?v=multi-cam-1">
 </head>
 
 <body>
     <header><label for="profile">类别</label><select id="profile" aria-label="机器人类别" disabled></select><b>数据集目录</b><input id="path"
             placeholder="例如 /mnt/.../COL26071359B_rect11" aria-label="数据集总目录"><label>Episode</label><input id="episode-index" type="number" min="0" step="1" value="0" aria-label="episode 序号" style="flex:0 0 90px;min-width:0"><button
             id="load-button" disabled onclick="loadEpisode()">加载</button><button id="edit-custom-config" hidden onclick="toggleConfig()">编辑配置</button><span id="status" role="status" aria-live="polite"></span></header>
-    <dialog id="config-box" class="config-box"><b>自定义类别配置</b><p style="font-size:12px;color:#62584f">配置仅保存在当前浏览器，不会写入服务器 YAML。数组必须填写 6 个数字，前 3 个是左臂 XYZ，后 3 个是右臂 XYZ。</p><table style="width:100%;font-size:12px;margin:10px 0 14px;border-collapse:collapse"><tr><th style="text-align:left">参数</th><th style="text-align:left">填写说明</th></tr><tr><td>video_key</td><td>视频目录名称，例如 observation.images.cam_high</td></tr><tr><td>arms_key</td><td>Parquet 中的位置或状态字段名称</td></tr><tr><td>lr_xyz_indices</td><td>6 个索引，例如 0,1,2,8,9,10</td></tr><tr><td>lr_xyz_direction</td><td>6 个方向系数，只能填写 1 或 -1</td></tr></table><div class="config-grid">
+    <div id="task-bar" class="task-bar" hidden><span class="task-label">Task</span><span id="task-prompt" class="task-prompt"></span></div>
+    <dialog id="config-box" class="config-box"><b>自定义类别配置</b><p style="font-size:12px;color:#62584f">配置仅保存在当前浏览器，不会写入服务器 YAML。数组必须填写 6 个数字，前 3 个是左臂 XYZ，后 3 个是右臂 XYZ。</p><table style="width:100%;font-size:12px;margin:10px 0 14px;border-collapse:collapse"><tr><th style="text-align:left">参数</th><th style="text-align:left">填写说明</th></tr><tr><td>video_key</td><td>主相机（时钟源），例如 observation.images.head_color</td></tr><tr><td>video_keys</td><td>可选多路，逗号分隔；第一路应与 video_key 一致</td></tr><tr><td>arms_key</td><td>Parquet 中的位置或状态字段名称</td></tr><tr><td>lr_xyz_indices</td><td>6 个索引，例如 0,1,2,8,9,10</td></tr><tr><td>lr_xyz_direction</td><td>6 个方向系数，只能填写 1 或 -1</td></tr></table><div class="config-grid">
         <label for="cfg-video">video_key</label><input id="cfg-video"><label for="cfg-arms">arms_key</label><input id="cfg-arms">
+        <label for="cfg-videos">video_keys<br>（可选）</label><input id="cfg-videos" placeholder="head,hand_left,hand_right 完整键名，逗号分隔" style="grid-column:2/-1">
         <label for="cfg-indices">lr_xyz_indices</label><input id="cfg-indices" placeholder="0,1,2,8,9,10"><label for="cfg-direction">lr_xyz_direction</label><input id="cfg-direction" placeholder="-1,-1,1,-1,-1,1">
         <label for="cfg-offset">位置偏移<br>（可选，米）</label><input id="cfg-offset" placeholder="留空为 0；左 XYZ、右 XYZ">
         <label for="cfg-grip-offset">夹爪局部偏移<br>（可选，米）</label><input id="cfg-grip-offset" placeholder="留空显示原 EE；左 XYZ、右 XYZ">
@@ -25,12 +27,31 @@
     </div></dialog>
     <main class="layout">
         <section class="panel">
-            <div class="plot-toolbar"><b>EE</b><div class="plot-readout"><span class="readout-title left-label">左臂</span><span id="left-x">—</span><span id="left-y">—</span><span id="left-z">—</span><span id="left-v">—</span><span class="readout-title">右臂</span><span id="right-x">—</span><span id="right-y">—</span><span id="right-z">—</span><span id="right-v">—</span></div><button data-arm="left">左臂</button><button
-                    data-arm="right">右臂</button><button data-arm="both">同时</button></div>
+            <div class="plot-toolbar">
+                <b>EE</b>
+                <div class="plot-readout"><span class="readout-title left-label">左臂</span><span id="left-x">—</span><span id="left-y">—</span><span id="left-z">—</span><span id="left-v">—</span><span class="readout-title">右臂</span><span id="right-x">—</span><span id="right-y">—</span><span id="right-z">—</span><span id="right-v">—</span></div>
+                <button data-arm="left" disabled>左臂</button><button data-arm="right" disabled>右臂</button><button data-arm="both" disabled>同时</button>
+                <span class="toolbar-sep" aria-hidden="true"></span>
+                <button data-camera="home" disabled title="复位视角 (R / 1)">复位</button>
+                <button data-camera="top" disabled title="俯视 XY (2)">俯视</button>
+                <button data-camera="front" disabled title="正视 (3)">正视</button>
+                <button data-camera="side" disabled title="侧视 (4)">侧视</button>
+                <span class="toolbar-sep" aria-hidden="true"></span>
+                <button data-dragmode="turntable" class="active" disabled title="转盘：保持 Z 向上">转盘</button>
+                <button data-dragmode="orbit" disabled title="自由轨道旋转">轨道</button>
+                <span class="camera-hint" title="左键旋转 · 右键平移 · 滚轮缩放 · 双击复位">左键转 · 右键移 · 滚轮缩放</span>
+            </div>
             <div id="plot"></div>
         </section>
         <div id="column-resizer" class="column-resizer" role="separator" tabindex="0" aria-label="调整轨迹与视频宽度" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="70" aria-valuenow="62" title="拖动调整轨迹与视频宽度"></div>
-        <section class="panel video-panel"><video id="video" controls preload="metadata"></video>
+        <section class="panel video-panel">
+            <div id="video-grid" class="video-grid" data-count="1">
+                <div class="video-cell video-cell-primary">
+                    <span class="video-label" id="video-label-primary">camera</span>
+                    <video id="video" controls preload="metadata"></video>
+                </div>
+                <div id="video-secondary" class="video-secondary"></div>
+            </div>
             <div id="row-resizer" class="row-resizer" role="separator" aria-label="调整视频与速度图高度" aria-orientation="horizontal" aria-valuemin="20" aria-valuemax="80" aria-valuenow="50" tabindex="0" title="上下拖动调整高度；双击恢复"></div>
             <div class="speed-charts"><div id="speed-chart-right"></div><div id="speed-chart-left"></div></div>
         </section>
@@ -57,15 +78,17 @@ function message(text, error=false) { $('status').textContent=text; $('status').
 function toggleConfig() { $('config-status').textContent = ''; $('config-box').showModal(); loadProfileConfig('__custom__'); }
 async function loadProfileConfig() {
     const name = arguments[0] || $('profile').value; if (!name) return;
-    if (name === '__custom__') { try { const saved = localStorage.getItem('ee-viewer-custom-config'); if (!saved) return loadProfileConfig($('profile').dataset.customSource || $('profile').options[0].value); const c = JSON.parse(saved); $('cfg-video').value=c.video_key||''; $('cfg-arms').value=c.arms_key||''; $('cfg-indices').value=(c.lr_xyz_indices||[]).join(','); $('cfg-direction').value=(c.lr_xyz_direction||[]).join(','); $('cfg-offset').value=(c.lr_xyz_offset||[]).join(','); $('cfg-grip-offset').value=(c.lr_grip_offset||[]).join(','); } catch {} return; }
+    if (name === '__custom__') { try { const saved = localStorage.getItem('ee-viewer-custom-config'); if (!saved) return loadProfileConfig($('profile').dataset.customSource || $('profile').options[0].value); const c = JSON.parse(saved); $('cfg-video').value=c.video_key||''; $('cfg-arms').value=c.arms_key||''; $('cfg-videos').value=Array.isArray(c.video_keys)?c.video_keys.join(','):(c.video_keys||''); $('cfg-indices').value=(c.lr_xyz_indices||[]).join(','); $('cfg-direction').value=(c.lr_xyz_direction||[]).join(','); $('cfg-offset').value=(c.lr_xyz_offset||[]).join(','); $('cfg-grip-offset').value=(c.lr_grip_offset||[]).join(','); } catch {} return; }
     try { const r = await fetch(`api/profile-config?${new URLSearchParams({ profile: name })}`, { cache: 'no-store' }); const c = await r.json(); if (!r.ok) throw new Error(c.detail || '配置读取失败');
-        $('cfg-video').value = c.video_key; $('cfg-arms').value = c.arms_key; $('cfg-indices').value = c.lr_xyz_indices.join(','); $('cfg-direction').value = c.lr_xyz_direction.join(','); $('config-status').textContent = '';
+        $('cfg-video').value = c.video_key; $('cfg-arms').value = c.arms_key; $('cfg-videos').value = (c.video_keys || []).join(','); $('cfg-indices').value = c.lr_xyz_indices.join(','); $('cfg-direction').value = c.lr_xyz_direction.join(','); $('config-status').textContent = '';
         $('cfg-offset').value = (c.lr_xyz_offset || []).join(','); $('cfg-grip-offset').value = (c.lr_grip_offset || []).join(',');
     } catch (e) { $('config-status').textContent = e.message; }
 }
 async function saveProfileConfig() {
     const name = $('profile').value, parse = id => $(id).value.split(',').map(v => v.trim() ? Number(v.trim()) : NaN);
     const payload = { video_key: $('cfg-video').value.trim(), arms_key: $('cfg-arms').value.trim(), lr_xyz_indices: parse('cfg-indices'), lr_xyz_direction: parse('cfg-direction') };
+    const keys = $('cfg-videos').value.split(',').map(v => v.trim()).filter(Boolean);
+    if (keys.length) payload.video_keys = keys;
     payload.lr_xyz_offset = $('cfg-offset').value.trim() ? parse('cfg-offset') : [0,0,0,0,0,0];
     payload.lr_grip_offset = $('cfg-grip-offset').value.trim() ? parse('cfg-grip-offset') : [0,0,0,0,0,0];
     if ([payload.lr_xyz_offset, payload.lr_grip_offset].some(v => v.length !== 6 || v.some(x => !Number.isFinite(x)))) { $('config-status').textContent = '偏移必须是 6 个有限数字，或留空'; return; }
@@ -92,7 +115,7 @@ async function loadEpisode() {
         if (profile === '__custom__') {
             const saved = JSON.parse(localStorage.getItem('ee-viewer-custom-config') || '{}');
             // 仅发送当前支持的配置，旧浏览器缓存中的已删除字段不会阻断加载。
-            query.config_json = JSON.stringify(Object.fromEntries(['video_key', 'arms_key', 'lr_xyz_indices', 'lr_xyz_direction', 'lr_xyz_offset', 'lr_grip_offset'].filter(k => k in saved).map(k => [k, saved[k]])));
+            query.config_json = JSON.stringify(Object.fromEntries(['video_key', 'video_keys', 'arms_key', 'lr_xyz_indices', 'lr_xyz_direction', 'lr_xyz_offset', 'lr_grip_offset'].filter(k => k in saved).map(k => [k, saved[k]])));
         }
         const response = await fetch(`api/episode?${new URLSearchParams(query)}`, { signal });
         const data = await response.json();

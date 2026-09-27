@@ -37,6 +37,7 @@ class ReaderModel(BaseModel):
 class ProfileConfig(ReaderModel):
     """声明字段映射及可选显示偏移，位置按原值乘方向后加偏移计算。"""
     video_key: str = Field(min_length=1)
+    video_keys: list[str] | None = None
     arms_key: str = Field(min_length=1)
     lr_xyz_indices: tuple[int, int, int, int, int, int]
     lr_xyz_direction: tuple[float, float, float, float, float, float]
@@ -58,6 +59,21 @@ class ProfileConfig(ReaderModel):
         if any(v not in (-1, 1) for v in value):
             raise ValueError("lr_xyz_direction 必须只包含 -1 或 1")
         return value
+
+    @field_validator("video_keys")
+    @classmethod
+    def check_video_keys(cls, value):
+        """可选多路相机；空列表视为未配置。"""
+        if value is None:
+            return None
+        keys = [key.strip() for key in value if isinstance(key, str) and key.strip()]
+        if not keys:
+            return None
+        if len(keys) > 6:
+            raise ValueError("video_keys 最多 6 路")
+        if len(set(keys)) != len(keys):
+            raise ValueError("video_keys 不能重复")
+        return keys
 
 
 class ViewerConfig(ReaderModel):
@@ -159,6 +175,55 @@ def dataset_file(path: Path, root: Path) -> Path:
     return resolved
 
 
+def episode_task(root: Path, episode: int) -> str | None:
+    """从 meta/episodes.jsonl 读取 language task；缺省时回退 tasks.jsonl。"""
+    episodes_path = root / "meta/episodes.jsonl"
+    if episodes_path.is_file() or episodes_path.is_symlink():
+        try:
+            path = dataset_file(episodes_path, root)
+            with path.open(encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    row = json.loads(line)
+                    if int(row.get("episode_index", -1)) != episode:
+                        continue
+                    tasks = row.get("tasks")
+                    if isinstance(tasks, list) and tasks:
+                        text = tasks[0]
+                        return text.strip() if isinstance(text, str) and text.strip() else None
+                    if isinstance(tasks, str) and tasks.strip():
+                        return tasks.strip()
+                    task_index = row.get("task_index")
+                    if task_index is not None:
+                        return task_from_index(root, int(task_index))
+                    break
+        except (OSError, UnicodeError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            pass
+    return None
+
+
+def task_from_index(root: Path, task_index: int) -> str | None:
+    tasks_path = root / "meta/tasks.jsonl"
+    if not (tasks_path.is_file() or tasks_path.is_symlink()):
+        return None
+    try:
+        path = dataset_file(tasks_path, root)
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                if int(row.get("task_index", -1)) == task_index:
+                    text = row.get("task")
+                    return text.strip() if isinstance(text, str) and text.strip() else None
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return None
+    return None
+
+
 def source_map(root: Path, episode: int, frames: int, warnings: list) -> list | None:
     """可选来源映射无效时明确提示，不伪造来源帧号。"""
     path = root / "source_frame_map.csv"
@@ -234,7 +299,7 @@ def episode(
         else:
             raise HTTPException(422, "请输入数据集目录")
         # 保留数据集内的逻辑 chunk/stem，再校验符号链接的实际目标。
-        video_path = f"videos/{parquet.parent.name}/{spec.video_key}/{parquet.stem}.mp4"
+        chunk_name, episode_stem = parquet.parent.name, parquet.stem
         parquet = dataset_file(parquet, root)
         info = json.loads(dataset_file(root / "meta/info.json", root).read_text(encoding="utf-8"))
         if "fps" not in info:
@@ -242,7 +307,10 @@ def episode(
         fps = float(info["fps"])
         if not np.isfinite(fps) or fps <= 0:
             raise HTTPException(422, "FPS 必须是有限正数")
-        video = dataset_file(root / video_path, root)
+        video_keys = list(spec.video_keys) if spec.video_keys else [spec.video_key]
+        if video_keys[0] != spec.video_key:
+            # 主时钟始终是 video_key；其余路按配置顺序接在后面（去重）。
+            video_keys = [spec.video_key, *[key for key in video_keys if key != spec.video_key]]
         columns = [spec.arms_key, "timestamp", "frame_index"]
         with pq.ParquetFile(parquet) as reader:
             frames = reader.metadata.num_rows
@@ -283,18 +351,35 @@ def episode(
             raise HTTPException(422, "位置或速度包含 NaN/Inf")
         warnings = []
         mapping = source_map(root, number, frames, warnings)
-        stat = video.stat()
-        token = secrets.token_urlsafe(24)
-        with MEDIA_LOCK:
-            MEDIA[token] = (video, root, (stat.st_ino, stat.st_size, stat.st_mtime_ns))
-            while len(MEDIA) > 128:
-                MEDIA.popitem(last=False)
+        videos = []
+        for key in video_keys:
+            rel = f"videos/{chunk_name}/{key}/{episode_stem}.mp4"
+            try:
+                path = dataset_file(root / rel, root)
+            except HTTPException as exc:
+                if key == video_keys[0]:
+                    raise
+                warnings.append(f"缺少相机 {key}，已跳过")
+                continue
+            stat = path.stat()
+            token = secrets.token_urlsafe(24)
+            with MEDIA_LOCK:
+                MEDIA[token] = (path, root, (stat.st_ino, stat.st_size, stat.st_mtime_ns))
+                while len(MEDIA) > 128:
+                    MEDIA.popitem(last=False)
+            label = key.rsplit(".", 1)[-1]
+            videos.append({"key": key, "label": label, "url": f"api/video/{token}"})
+        if not videos:
+            raise HTTPException(404, f"找不到主相机视频：{video_keys[0]}")
         return {
             "profile": profile_name,
             "point_label": "工具点" if any(spec.lr_grip_offset) else "EE",
             "single_arm": spec.lr_xyz_indices[:3] == spec.lr_xyz_indices[3:] and spec.lr_xyz_direction[:3] == spec.lr_xyz_direction[3:] and spec.lr_xyz_offset[:3] == spec.lr_xyz_offset[3:] and spec.lr_grip_offset[:3] == spec.lr_grip_offset[3:],
             "episode": number, "fps": fps, "frames": frames, "duration": frames / fps,
-            "video_url": f"api/video/{token}", "left": left.tolist(), "right": right.tolist(),
+            "task": episode_task(root, number),
+            "video_url": videos[0]["url"],
+            "videos": videos,
+            "left": left.tolist(), "right": right.tolist(),
             "left_speed": [None, *left_speed.tolist()], "right_speed": [None, *right_speed.tolist()],
             "source_frames": mapping, "warnings": warnings,
         }
@@ -372,13 +457,21 @@ def plotly_asset() -> FileResponse:
 @app.get("/assets/viewer-core.js")
 def viewer_core_asset() -> FileResponse:
     """两版页面共用同一份轨迹和播放逻辑。"""
-    return FileResponse(Path(__file__).parent / 'public/assets/viewer-core.js', media_type='application/javascript')
+    return FileResponse(
+        Path(__file__).parent / "public/assets/viewer-core.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/assets/viewer.css")
 def viewer_style_asset() -> FileResponse:
     """两版页面共用工作区样式。"""
-    return FileResponse(Path(__file__).parent / 'public/assets/viewer.css', media_type='text/css')
+    return FileResponse(
+        Path(__file__).parent / "public/assets/viewer.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
