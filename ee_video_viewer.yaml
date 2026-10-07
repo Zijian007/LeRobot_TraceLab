@@ -38,13 +38,13 @@ profiles:
     lr_xyz_indices: [0, 1, 2, 8, 9, 10]
     lr_xyz_direction: [1, 1, 1, 1, 1, 1]
 
-  # wholebody teleop export (observation.pose = L/R xyz+rot6d+grip)
+  # wholebody teleop export (state.pose = L/R xyz+rot6d+grip)
   Wholebody:
     video_key: observation.images.head_color
     video_keys:
       - observation.images.head_color
       - observation.images.hand_left_color
       - observation.images.hand_right_color
-    arms_key: observation.pose
+    arms_key: state.pose
     lr_xyz_indices: [0, 1, 2, 10, 11, 12]
     lr_xyz_direction: [1, 1, 1, 1, 1, 1]
