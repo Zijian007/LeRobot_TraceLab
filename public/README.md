@@ -74,7 +74,7 @@ python build.py
 
 目录导入后，在顶部 `Episode` 输入非负整数（默认 0），点击“加载”或回车，即可匹配同一数据集、同一 chunk 中对应的 parquet 和当前类别视频；成功后显示 `episode N 已加载`。指定序号不存在时明确报错。单独文件弹窗确认后使用所选文件，Episode 从 parquet 文件名识别。
 
-项目仓库：https://github.com/Peaceful-World-X/LeRobot_TraceLab 。右上角访问徽章使用与 Action-Chunking-Survey 相同的第三方服务，统计页面访问而非独立访客人数；徽章加载会请求该服务，所选 parquet/视频仍在浏览器本地处理。计数服务不可用时显示文字提示。
+本 fork：https://github.com/Zijian007/LeRobot_TraceLab 。上游：https://github.com/Peaceful-World-X/LeRobot_TraceLab 。G2 数采查看器在 wholebody `external_services/tracelab`。右上角访问徽章统计页面访问而非独立访客人数；所选 parquet/视频仍在浏览器本地处理。
 
 ## 与服务器版一致的工作区
 

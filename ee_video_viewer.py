@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""运行 python ee_video_viewer.py，然后打开 http://localhost:9090。
+"""Generic / H01 viewer. G2 数采请用::
+
+    python -m wholebody.external_services.tracelab
+
 依赖：pip install fastapi uvicorn numpy pyarrow plotly pyyaml
 在网页选择机器人类别、数据集目录与 episode；读取规则见 ee_video_viewer.yaml。
 """

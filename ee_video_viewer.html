@@ -13,7 +13,7 @@
 
 <body>
     <header><label for="profile">类别</label><select id="profile" aria-label="机器人类别" disabled></select><b>数据集目录</b><input id="path"
-            placeholder="例如 /mnt/.../COL26071359B_rect11" aria-label="数据集总目录"><label>Episode</label><input id="episode-index" type="number" min="0" step="1" value="0" aria-label="episode 序号" style="flex:0 0 90px;min-width:0"><button
+            placeholder="例如 /home/agi/wholebody/recorded/vr/drink/lerobot_v21" aria-label="数据集总目录"><label>Episode</label><input id="episode-index" type="number" min="0" step="1" value="0" aria-label="episode 序号" style="flex:0 0 90px;min-width:0"><button
             id="load-button" disabled onclick="loadEpisode()">加载</button><button id="edit-custom-config" hidden onclick="toggleConfig()">编辑配置</button><span id="status" role="status" aria-live="polite"></span></header>
     <div id="task-bar" class="task-bar" hidden><span class="task-label">Task</span><span id="task-prompt" class="task-prompt"></span></div>
     <dialog id="config-box" class="config-box"><b>自定义类别配置</b><p style="font-size:12px;color:#62584f">配置仅保存在当前浏览器，不会写入服务器 YAML。数组必须填写 6 个数字，前 3 个是左臂 XYZ，后 3 个是右臂 XYZ。</p><table style="width:100%;font-size:12px;margin:10px 0 14px;border-collapse:collapse"><tr><th style="text-align:left">参数</th><th style="text-align:left">填写说明</th></tr><tr><td>video_key</td><td>主相机（时钟源），例如 observation.images.head_color</td></tr><tr><td>video_keys</td><td>可选多路，逗号分隔；第一路应与 video_key 一致</td></tr><tr><td>arms_key</td><td>Parquet 中的位置或状态字段名称</td></tr><tr><td>lr_xyz_indices</td><td>6 个索引，例如 0,1,2,8,9,10</td></tr><tr><td>lr_xyz_direction</td><td>6 个方向系数，只能填写 1 或 -1</td></tr></table><div class="config-grid">
